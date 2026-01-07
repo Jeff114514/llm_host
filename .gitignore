@@ -1,0 +1,4 @@
+/config/api_keys.json
+/logs/
+/.pids/
+**/__pycache__/

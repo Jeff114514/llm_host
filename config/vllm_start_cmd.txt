@@ -1,0 +1,2 @@
+python -m vllm.entrypoints.openai.api_server --tokenizer-mode auto --model /root/sj-tmp/LLM/Qwen3-80B-A3B/ --dtype bfloat16 --tensor-parallel-size 2 --pipeline-parallel-size 3 --disable-log-requests --port 8002 --gpu 0.9 --max-num-seqs 512 --served-model-name Qwen3-80B-A3B --enable-prefix-caching
+

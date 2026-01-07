@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+slowapi
+prometheus-fastapi-instrumentator
+httpx
+pyyaml
+python-multipart
+structlog

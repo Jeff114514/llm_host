@@ -1,0 +1,22 @@
+# FastAPI vLLM Proxy 配置文件
+
+# vLLM服务配置
+vllm_host: localhost
+vllm_port: 8002
+
+# FastAPI服务配置
+fastapi_host: 0.0.0.0
+fastapi_port: 8001
+
+# API Keys文件路径
+api_keys_file: config/api_keys.json
+
+# 请求限制配置（null表示不限制）
+rate_limit:
+  qps: null                    # 每秒请求数限制
+  concurrent: null             # 并发连接数限制
+  tokens_per_minute: null      # 每分钟token数限制
+
+# 日志级别
+log_level: INFO
+
