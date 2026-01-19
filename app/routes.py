@@ -7,6 +7,7 @@ from app.limiter import RequestLimiter
 from app.config_manager import get_config
 from app.vllm_client import forward_stream_request, forward_non_stream_request, forward_get_request
 from app.monitoring import logger
+import httpx
 
 
 def create_routes(app: FastAPI, request_limiter: RequestLimiter):
@@ -18,6 +19,22 @@ def create_routes(app: FastAPI, request_limiter: RequestLimiter):
         if app_config.rate_limit.qps is not None:
             return request_limiter.limiter.limit(f"{app_config.rate_limit.qps}/second")(func)
         return func
+
+    async def _require_admin(api_key_info: APIKeyInfo):
+        if api_key_info.user != "admin":
+            logger.warning("admin_permission_denied", user=api_key_info.user)
+            raise HTTPException(status_code=401, detail="无权限操作")
+
+    async def _post_to_vllm(url: str, body: dict) -> dict:
+        """向 vLLM 管理端点转发 POST 请求（返回 JSON 或文本）。"""
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, json=body, headers={"Content-Type": "application/json"})
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        try:
+            return resp.json()
+        except Exception:
+            return {"message": resp.text}
     
     @app.get("/health")
     async def health_check():
@@ -260,6 +277,34 @@ def create_routes(app: FastAPI, request_limiter: RequestLimiter):
             "cleanup_result": result,
             "current_stats": stats
         }
+
+    @app.post("/admin/load-lora-adapter")
+    async def load_lora_adapter(
+        request: Request,
+        api_key_info: APIKeyInfo = Depends(verify_api_key),
+    ):
+        """动态加载 LoRA（需要管理员权限）"""
+        await _require_admin(api_key_info)
+        body = await request.json()
+        vllm_url = f"http://{app_config.vllm_host}:{app_config.vllm_port}/v1/load_lora_adapter"
+        logger.info("admin_load_lora_requested", user=api_key_info.user, payload=body)
+        result = await _post_to_vllm(vllm_url, body)
+        logger.info("admin_load_lora_completed", user=api_key_info.user, result=result)
+        return result
+
+    @app.post("/admin/unload-lora-adapter")
+    async def unload_lora_adapter(
+        request: Request,
+        api_key_info: APIKeyInfo = Depends(verify_api_key),
+    ):
+        """动态卸载 LoRA（需要管理员权限）"""
+        await _require_admin(api_key_info)
+        body = await request.json()
+        vllm_url = f"http://{app_config.vllm_host}:{app_config.vllm_port}/v1/unload_lora_adapter"
+        logger.info("admin_unload_lora_requested", user=api_key_info.user, payload=body)
+        result = await _post_to_vllm(vllm_url, body)
+        logger.info("admin_unload_lora_completed", user=api_key_info.user, result=result)
+        return result
     
     @app.get("/admin/log-stats")
     async def get_log_statistics(

@@ -20,3 +20,36 @@ rate_limit:
 # 日志级别
 log_level: INFO
 
+# vLLM 启动与 LoRA 配置
+vllm:
+  auto_start: true                  # FastAPI 启动时是否自动拉起 vLLM
+  launch_mode: python_api            # python_api | cli
+  start_cmd_file: config/vllm_start_cmd.txt
+  start_cmd: null                    # 可选：直接在此写入启动命令字符串
+  log_dir: logs
+  log_file: logs/vllm.log
+  log_max_size_mb: 100.0
+  pid_dir: .pids
+  pid_file: .pids/vllm.pid
+  python_launcher:
+    enabled: true
+    conda_env: Jeff-py312
+    env_file: null
+  extra_env: {}                      # 传递给 vLLM 子进程的额外环境变量
+  lora:
+    enabled: false               # 启用 LoRA 模式，允许 per-request 切换
+    max_lora_rank: 32
+    max_loras: 4
+    max_cpu_loras: 4                 # 必须 >= max_loras
+    preload: []                      # 预加载 LoRA 列表
+    # 示例:
+    #   - name: sql-lora
+    #     path: /path/to/sql-lora
+    #     base_model_name: meta-llama/Llama-2-7b
+    default_mm_loras: {}             # 多模态输入与 LoRA 的映射
+    limit_mm_per_prompt: {}          # 每个模态的 LoRA 限流
+    runtime_resolver:
+      allow_runtime_updates: true    # 开启动态加载/卸载接口
+      plugins:
+        - lora_filesystem_resolver
+      cache_dir: ./lora_cache

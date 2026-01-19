@@ -1,66 +1,46 @@
-# Nginx配置说明
+## 概览
 
-## 安装Nginx
+`nginx` 目录包含 **Nginx 反向代理配置文件**，用于在 FastAPI 服务前提供网络边界层。  
+本文件只说明配置文件的结构与反向代理规则，如何安装、配置与启动 Nginx 请参考：
 
-### Ubuntu/Debian
-```bash
-sudo apt update
-sudo apt install nginx
+- `docs/NGINX_SETUP.md`
+
+## 文件结构
+
+```text
+nginx/
+└── nginx.conf  # Nginx 反向代理配置
 ```
 
-### CentOS/RHEL
-```bash
-sudo yum install nginx
-```
+## `nginx.conf` – Nginx 配置
 
-## 配置说明
+该文件定义了 Nginx 作为反向代理的完整配置。
 
-### 方式1: 作为独立配置文件使用（推荐）
+### 主要配置项
 
-1. 测试配置：
-```bash
-nginx -t -c /root/sj-tmp/Jeff/LLMHOST/nginx/nginx.conf
-```
+- **upstream 块**
+  - 定义后端 FastAPI 服务地址（默认 `localhost:8001`）
+- **server 块**
+  - `listen`: 监听端口（默认 `8000`）
+  - `location /`: 将所有请求转发到 upstream
+  - **超时设置**: 300 秒（适合 LLM 长文本生成）
+  - **流式支持**: 关闭缓冲以支持流式响应（SSE）
+  - **日志配置**: 访问日志与错误日志路径
 
-2. 启动Nginx（使用指定配置文件）：
-```bash
-nginx -c /root/sj-tmp/Jeff/LLMHOST/nginx/nginx.conf
-```
+### 设计原则
 
-### 方式2: 集成到主Nginx配置
+- **纯反向代理**: Nginx 不进行任何认证、限流或业务逻辑处理
+- **所有控制逻辑在 FastAPI**: 认证、限流、监控等都在 FastAPI 层实现
+- **优势**: 
+  - 统一管理：所有控制逻辑集中在 FastAPI
+  - 更灵活：可以动态调整限制策略
+  - 更精确：可以基于 API key、用户等维度进行限制
 
-1. 将配置内容添加到主Nginx配置文件的`http`块内：
-```bash
-# 编辑主配置文件 /etc/nginx/nginx.conf
-# 在http块内添加：
-include /root/sj-tmp/Jeff/LLMHOST/nginx/nginx.conf;
-```
-
-2. 测试配置：
-```bash
-sudo nginx -t
-```
-
-3. 重启Nginx：
-```bash
-sudo systemctl restart nginx
-```
-
-**注意**: 如果使用方式2，需要修改nginx.conf文件，移除外层的`http`和`events`块，只保留`upstream`和`server`块内容。
-
-## 配置说明
-
-- **反向代理**: 所有请求转发到FastAPI（端口8001）
-- **超时设置**: 300秒（适合LLM长文本生成）
-- **流式支持**: 关闭缓冲以支持流式响应
-- **注意**: 限流、认证等控制逻辑都在FastAPI中处理，Nginx仅作为反向代理
-
-## 日志位置
+### 日志位置
 
 - 访问日志: `/var/log/nginx/vllm_proxy_access.log`
 - 错误日志: `/var/log/nginx/vllm_proxy_error.log`
 
-## SSL配置
+### SSL 配置
 
-如需启用HTTPS，请取消注释HTTPS server块，并配置SSL证书路径。
-
+- 如需启用 HTTPS，请取消注释 HTTPS server 块，并配置 SSL 证书路径

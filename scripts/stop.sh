@@ -16,6 +16,14 @@ NC='\033[0m' # No Color
 
 # PID文件目录
 PID_DIR="$PROJECT_DIR/.pids"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_LAUNCHER="$PROJECT_DIR/scripts/start_vllm.py"
+CONDA_ENV="${CONDA_ENV:-Jeff-py312}"
+if command -v conda &> /dev/null; then
+    CONDA_AVAILABLE=true
+else
+    CONDA_AVAILABLE=false
+fi
 
 # 停止服务函数
 stop_service() {
@@ -46,6 +54,25 @@ stop_service() {
     fi
 }
 
+# 通过Python管理器停止vLLM
+stop_vllm_python() {
+    if [ ! -f "$PYTHON_LAUNCHER" ]; then
+        return 1
+    fi
+    local -a cmd
+    if [ "$CONDA_AVAILABLE" = true ]; then
+        # 确保无论从哪里执行，都能 import app（避免 ModuleNotFoundError: No module named 'app'）
+        cmd=(env PYTHONPATH="$PROJECT_DIR" conda run -n "$CONDA_ENV" "$PYTHON_BIN" "$PYTHON_LAUNCHER" --stop --force)
+    else
+        cmd=(env PYTHONPATH="$PROJECT_DIR" "$PYTHON_BIN" "$PYTHON_LAUNCHER" --stop --force)
+    fi
+    if "${cmd[@]}" >/dev/null 2>&1; then
+        echo -e "${GREEN}已请求Python管理器停止vLLM${NC}"
+        return 0
+    fi
+    return 1
+}
+
 # 主流程
 main() {
     echo -e "${GREEN}========================================${NC}"
@@ -54,6 +81,7 @@ main() {
     echo ""
     
     stop_service "fastapi"
+    stop_vllm_python || true
     stop_service "vllm"
     pkill -f VLLM
     

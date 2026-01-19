@@ -1,131 +1,59 @@
-# 监控配置说明
+## 概览
 
-## Prometheus配置
+`monitoring` 目录包含 **Prometheus 与 Grafana 的配置文件**，用于监控 vLLM Proxy 的运行指标。  
+本文件只说明配置文件的结构与作用，如何安装、启动与配置这些监控工具请参考：
 
-### 安装Prometheus
+- `docs/MONITORING_SETUP.md`
 
-1. 下载Prometheus: https://prometheus.io/download/
-```bash
-wget https://github.com/prometheus/prometheus/releases/download/v2.45.0/prometheus-2.45.0.linux-amd64.tar.gz
-tar xvfz prometheus-*.tar.gz
-cd prometheus-*
+## 文件结构
+
+```text
+monitoring/
+├── prometheus.yml      # Prometheus 抓取配置
+└── grafana/
+    └── dashboard.json  # Grafana 仪表板定义
 ```
 
-2. 复制配置文件:
-```bash
-cp ../monitoring/prometheus.yml /path/to/prometheus/prometheus.yml
-```
+## `prometheus.yml` – Prometheus 配置
 
-3. 启动Prometheus:
-```bash
-./prometheus --config.file=prometheus.yml
-```
+该文件用于配置 Prometheus 如何抓取 FastAPI 服务暴露的指标。
 
-或者使用systemd服务（推荐）:
-```bash
-# 创建systemd服务文件 /etc/systemd/system/prometheus.service
-sudo systemctl enable prometheus
-sudo systemctl start prometheus
-```
+### 主要配置项
 
-### 访问Prometheus
-- Web UI: http://localhost:9090
-- 指标查询: http://localhost:9090/graph
+- `scrape_interval`: 指标抓取间隔（默认 15 秒）
+- `scrape_configs`: 抓取目标列表
+  - `job_name`: 任务名称（如 `vllm_proxy`）
+  - `static_configs.targets`: FastAPI 服务地址列表（默认 `localhost:8001`）
 
-### 配置说明
-- `scrape_interval`: 指标抓取间隔（15秒）
-- `targets`: FastAPI服务地址（localhost:8001）
+### 指标端点
 
-## Grafana配置
+- FastAPI 通过 `prometheus-fastapi-instrumentator` 自动暴露 `/metrics` 端点
+- Prometheus 会定期访问该端点，收集以下指标：
+  - `http_requests_total`: HTTP 请求总数（按方法、端点、状态码）
+  - `http_request_duration_seconds`: 请求持续时间（直方图）
+  - `http_active_requests`: 活跃请求数（仪表）
+  - `http_errors_total`: 错误总数（按错误类型）
+  - `token_usage_total`: Token 使用总量（按 API key 和类型）
 
-### 安装Grafana
+## `grafana/dashboard.json` – Grafana 仪表板
 
-#### Ubuntu/Debian
-```bash
-sudo apt-get install -y software-properties-common
-sudo add-apt-repository "deb https://packages.grafana.com/oss/deb stable main"
-wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
-sudo apt-get update
-sudo apt-get install grafana
-sudo systemctl enable grafana-server
-sudo systemctl start grafana-server
-```
+该文件定义了 Grafana 仪表板的完整配置，包括：
 
-#### CentOS/RHEL
-```bash
-sudo yum install grafana
-sudo systemctl enable grafana-server
-sudo systemctl start grafana-server
-```
+- **数据源**: 指向 Prometheus（需在 Grafana 中手动配置）
+- **面板定义**: 各种图表与指标展示
+  - 请求总数与速率
+  - 平均响应时间（P95）
+  - 活跃请求数
+  - 错误率
+  - Token 使用量
+  - 请求分布（按状态码）
 
-#### 手动安装
-1. 下载Grafana: https://grafana.com/grafana/download
-2. 解压并启动:
-```bash
-tar -zxvf grafana-*.tar.gz
-cd grafana-*
-./bin/grafana-server
-```
+### 使用方式
 
-3. 访问 http://localhost:3000
-4. 默认用户名/密码: admin/admin（首次登录会要求修改密码）
+- 在 Grafana Web UI 中通过 "Import Dashboard" 功能导入该 JSON 文件
+- 导入后选择对应的 Prometheus 数据源即可查看监控面板
 
-### 配置数据源
+## 相关代码
 
-1. 登录Grafana
-2. 进入 Configuration > Data Sources
-3. 添加Prometheus数据源:
-   - URL: http://localhost:9090
-   - Access: Server (default)
-
-### 导入仪表板
-
-1. 进入 Dashboards > Import
-2. 上传 `grafana/dashboard.json` 文件
-3. 选择Prometheus数据源
-4. 点击Import
-
-### 监控指标说明
-
-- **请求总数**: HTTP请求速率（请求/秒）
-- **平均响应时间**: P95响应时间
-- **活跃请求数**: 当前正在处理的请求数
-- **错误率**: HTTP错误请求占比
-- **Token使用量**: 输入/输出Token使用速率
-- **请求分布**: 按状态码的请求分布
-
-## 监控指标列表
-
-### HTTP指标
-- `http_requests_total`: 总请求数（按方法、端点、状态码）
-- `http_request_duration_seconds`: 请求持续时间（直方图）
-- `http_active_requests`: 活跃请求数（仪表）
-- `http_errors_total`: 错误总数（按错误类型）
-
-### Token指标
-- `token_usage_total`: Token使用总量（按API key和类型）
-
-## 告警配置（可选）
-
-可以在Prometheus中配置告警规则，例如：
-- 错误率超过5%
-- 响应时间超过10秒
-- Token使用量异常
-
-## 故障排查
-
-1. **Prometheus无法抓取指标**
-   - 检查FastAPI服务是否运行在8001端口
-   - 检查 `/metrics` 端点是否可访问
-   - 查看Prometheus日志
-
-2. **Grafana无法连接Prometheus**
-   - 检查Prometheus是否运行
-   - 检查数据源URL配置
-   - 检查网络连接
-
-3. **仪表板无数据**
-   - 确认Prometheus正在抓取指标
-   - 检查时间范围设置
-   - 验证指标名称是否正确
-
+- `app/monitoring.py`: 定义了所有 Prometheus 指标与监控中间件
+- `app/main.py`: 通过 `Instrumentator` 自动暴露 `/metrics` 端点

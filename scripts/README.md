@@ -1,294 +1,74 @@
-# 脚本模块
+## 概览
 
-脚本模块包含启动和停止服务的自动化脚本。
+`scripts` 目录包含与运行时运维相关的 **辅助脚本**，本文件只说明每个脚本的职责与输入输出，不包含具体的启动命令或运维流程（这些内容已集中在 `docs` 中）。
+
+如需查看完整的启动/停止/日志管理指引，请参考：
+
+- `docs/START_GUIDE.md`：启动脚本与 Python 启动器使用说明
+- `docs/LOG_ROTATION.md`：日志轮转与清理说明
 
 ## 文件结构
 
-```
+```text
 scripts/
-├── start.sh             # 启动脚本
-└── stop.sh              # 停止脚本
+├── start.sh         # 一键启动 vLLM + FastAPI (+ Nginx 可选)
+├── stop.sh          # 一键停止所有组件
+├── start_vllm.py    # 通过 Python 管理 vLLM 进程
+└── log_rotate.sh    # 日志轮转与清理辅助脚本
 ```
 
-## 脚本说明
-
-### start.sh
-
-启动脚本，用于启动所有服务（vLLM、FastAPI、Nginx）。
-
-**功能**:
-- 自动检测Conda环境
-- 启动vLLM服务（使用Conda环境）
-- 启动FastAPI服务
-- 可选启动Nginx
-- 健康检查和服务就绪验证
-- PID文件管理
-
-**使用方法**:
-
-```bash
-# 基本使用（使用配置文件中的vLLM命令）
-./scripts/start.sh
-
-# 指定vLLM启动命令
-./scripts/start.sh 'python -m vllm.entrypoints.openai.api_server --model your-model --port 8002'
-
-# 使用环境变量指定vLLM命令
-export VLLM_START_CMD='your vllm command'
-./scripts/start.sh
-```
-
-**工作流程**:
-
-1. 检查Python环境和依赖
-2. 加载配置文件（`config/config.yaml`）
-3. 获取vLLM启动命令（优先级：参数 > 环境变量 > 配置文件 > 默认命令）
-4. 检查端口占用
-5. 启动vLLM服务（后台运行）
-6. 等待vLLM就绪
-7. 启动FastAPI服务（后台运行）
-8. 等待FastAPI就绪
-9. 可选启动Nginx
-10. 显示服务状态
-
-**输出信息**:
-- 服务启动状态
-- PID信息
-- 日志文件位置
-- 访问地址
-
-**日志文件**:
-- vLLM: `logs/vllm.log`
-- FastAPI: `logs/fastapi.log`
-
-**PID文件**:
-- vLLM: `.pids/vllm.pid`
-- FastAPI: `.pids/fastapi.pid`
-- Nginx: `.pids/nginx.pid`
-
-### stop.sh
-
-停止脚本，用于停止所有服务。
-
-**功能**:
-- 停止FastAPI服务
-- 停止vLLM服务
-- 可选停止Nginx
-- 清理PID文件
-
-**使用方法**:
-
-```bash
-./scripts/stop.sh
-```
-
-**工作流程**:
-
-1. 停止FastAPI服务（通过PID文件）
-2. 停止vLLM服务（通过PID文件）
-3. 询问是否停止Nginx
-4. 如果选择停止，先尝试通过PID文件停止
-5. 如果PID文件方式失败，通过进程查找停止
-6. 清理PID文件
-
-**停止方式**:
-- 优先使用PID文件
-- 如果PID文件不存在或进程不存在，通过进程查找
-- 优雅停止（SIGTERM）
-- 如果仍在运行，强制停止（SIGKILL）
-
-## 环境要求
-
-### Conda环境
-
-脚本会自动检测Conda环境（默认：Jeff-py312），可以通过环境变量修改：
-
-```bash
-export CONDA_ENV=your-env-name
-./scripts/start.sh
-```
-
-### 依赖检查
-
-启动脚本会检查：
-- Python3是否安装
-- Conda是否可用（可选）
-- Nginx是否安装（可选）
-
-## 配置依赖
-
-脚本依赖以下配置文件：
-
-- `config/config.yaml`: 主配置文件
-- `config/vllm_start_cmd.txt`: vLLM启动命令（可选）
-- `nginx/nginx.conf`: Nginx配置文件
-
-## 使用示例
-
-### 完整启动流程
-
-```bash
-# 1. 进入项目目录
-cd /root/sj-tmp/Jeff/LLMHOST
-
-# 2. 激活Conda环境（可选，脚本会自动检测）
-conda activate Jeff-py312
-
-# 3. 启动所有服务
-./scripts/start.sh
-
-# 4. 检查服务状态
-curl http://localhost:8001/health
-curl http://localhost:8000/health  # 通过Nginx
-```
-
-### 仅启动vLLM和FastAPI
-
-```bash
-# 启动服务
-./scripts/start.sh
-
-# 当询问是否启动Nginx时，选择N（不启动）
-```
-
-### 自定义vLLM启动命令
-
-```bash
-# 方式1: 通过参数传递
-./scripts/start.sh 'conda run -n Jeff-py312 python -m vllm.entrypoints.openai.api_server --model /path/to/model --port 8002'
-
-# 方式2: 通过环境变量
-export VLLM_START_CMD='your command'
-./scripts/start.sh
-
-# 方式3: 修改配置文件
-echo 'your command' > config/vllm_start_cmd.txt
-./scripts/start.sh
-```
-
-### 停止服务
-
-```bash
-# 停止所有服务
-./scripts/stop.sh
-
-# 当询问是否停止Nginx时，选择y（停止）或N（不停止）
-```
-
-## 故障排查
-
-### 服务启动失败
-
-1. **检查端口占用**:
-```bash
-lsof -i :8000  # Nginx
-lsof -i :8001  # FastAPI
-lsof -i :8002  # vLLM
-```
-
-2. **查看日志**:
-```bash
-tail -f logs/vllm.log
-tail -f logs/fastapi.log
-```
-
-3. **检查Conda环境**:
-```bash
-conda activate Jeff-py312
-python --version
-```
-
-4. **检查配置文件**:
-```bash
-cat config/config.yaml
-```
-
-### PID文件问题
-
-如果PID文件存在但进程不存在：
-
-```bash
-# 清理PID文件
-rm -f .pids/*.pid
-
-# 重新启动
-./scripts/start.sh
-```
-
-### Nginx启动失败
-
-1. **检查配置文件**:
-```bash
-nginx -t -c /root/sj-tmp/Jeff/LLMHOST/nginx/nginx.conf
-```
-
-2. **检查端口占用**:
-```bash
-lsof -i :8000
-```
-
-3. **查看Nginx错误日志**:
-```bash
-tail -f /var/log/nginx/vllm_proxy_error.log
-```
-
-### 服务无法停止
-
-如果正常停止失败：
-
-```bash
-# 手动查找并停止进程
-ps aux | grep vllm
-ps aux | grep uvicorn
-ps aux | grep nginx
-
-# 强制停止
-kill -9 <PID>
-```
-
-## 高级用法
-
-### 后台运行
-
-脚本已经使用nohup在后台运行服务，如果需要完全后台运行脚本本身：
-
-```bash
-nohup ./scripts/start.sh > start.log 2>&1 &
-```
-
-### 定时重启
-
-可以设置cron任务定期重启服务：
-
-```bash
-# 编辑crontab
-crontab -e
-
-# 添加任务（每天凌晨3点重启）
-0 3 * * * /root/sj-tmp/Jeff/LLMHOST/scripts/stop.sh && /root/sj-tmp/Jeff/LLMHOST/scripts/start.sh
-```
-
-### 监控脚本
-
-可以创建监控脚本检查服务状态：
-
-```bash
-#!/bin/bash
-# check_services.sh
-
-if ! curl -s http://localhost:8001/health > /dev/null; then
-    echo "FastAPI服务异常，正在重启..."
-    cd /root/sj-tmp/Jeff/LLMHOST
-    ./scripts/stop.sh
-    ./scripts/start.sh
-fi
-```
-
-## 注意事项
-
-1. **权限问题**: 确保脚本有执行权限：`chmod +x scripts/*.sh`
-2. **路径问题**: 脚本会自动检测项目目录，确保在项目根目录运行
-3. **端口冲突**: 确保配置的端口未被占用
-4. **资源限制**: 根据服务器资源调整vLLM和FastAPI的配置
-5. **日志管理**: 定期清理日志文件，避免磁盘空间不足
-
+## 脚本职责
+
+### `start.sh`
+
+- 读取 `config/config.yaml` 推导 vLLM / FastAPI 端口等基本信息
+- 检查 Python / Conda / Nginx 等运行环境
+- 结合 `config/vllm_start_cmd.txt` 或环境变量，决定 vLLM 的启动命令
+- **优先** 调用 `start_vllm.py` 以 Python 方式启动 vLLM，失败时回退到纯命令行方式
+- 启动 FastAPI（`uvicorn app.main:app`），负责：
+  - 日志输出重定向到 `logs/fastapi.log`
+  - 将进程 PID 写入 `.pids/fastapi.pid`
+- 按需启动 Nginx，并将 PID 写入 `.pids/nginx.pid`
+- 启动完成后，对主要端口做健康检查并打印当前服务状态
+
+### `stop.sh`
+
+- 从 `.pids` 目录读取 PID，优先按记录的 PID 停止：
+  - FastAPI 进程
+  - 通过 `start_vllm.py` 管理的 vLLM 进程（如有）
+  - Nginx 主进程（可选）
+- 如 PID 文件与实际进程不一致，会回退到按进程名与端口搜索的方式进行停止
+- 先尝试优雅停止（`SIGTERM` / `QUIT`），必要时升级为强制停止（`SIGKILL`）
+- 停止完成后清理对应的 PID 文件
+
+### `start_vllm.py`
+
+- 通过 `app.config_manager` + `app.vllm_manager.VLLMManager` 调用 vLLM：
+  - 启动 vLLM 进程（支持 `python_api` / `cli` 两种模式）
+  - 等待 vLLM 通过 `/health` 或 `/v1/models` 就绪
+  - 将 vLLM PID 写入 `VLLMConfig.pid_file`（默认 `.pids/vllm.pid`）
+- 支持的操作模式：
+  - 仅启动 vLLM（可选阻塞等待）
+  - 仅停止当前 vLLM（支持 `--force`）
+  - 先停后启的重启模式
+- 主要作为 `start.sh` 与 `stop.sh` 内部的 **Python 入口**，封装 vLLM 管理的细节。
+
+### `log_rotate.sh`
+
+- 对 `logs/` 下的当前日志文件（如 `fastapi.log` / `vllm.log`）按大小进行轮转：
+  - 超过指定阈值（默认 100 MB）时重命名为带时间戳的备份文件
+  - 重新创建空日志文件，保持文件描述符可用
+- 对历史轮转文件（`*.log.*`）按保留天数进行清理：
+  - 统计并输出删除的文件数量与释放的空间
+- 脚本逻辑与 `app.log_manager` 的行为保持一致，可视为运行时的 **命令行版工具**。
+
+## 依赖与约定
+
+- 所有脚本默认在 **项目根目录** 运行，并假设以下路径存在或可创建：
+  - `config/config.yaml`
+  - `logs/`
+  - `.pids/`
+- 环境相关约定：
+  - 默认 Conda 环境名由环境变量 `CONDA_ENV` 控制（脚本中默认值为 `Jeff-py312`）
+  - 当未检测到 Conda 时，会回退到系统 Python
+- PID 与日志文件路径需与 `AppConfig` / `VLLMConfig` 中的设置保持一致，以避免管理错乱。

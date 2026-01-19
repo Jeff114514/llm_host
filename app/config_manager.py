@@ -15,27 +15,15 @@ def load_config() -> AppConfig:
     
     if os.path.exists(config_file):
         with open(config_file, 'r', encoding='utf-8') as f:
-            config_data = yaml.safe_load(f)
+            config_data = yaml.safe_load(f) or {}
         return AppConfig(**config_data)
-    else:
-        # 创建默认配置
-        os.makedirs(os.path.dirname(config_file), exist_ok=True)
-        default_config = {
-            "vllm_host": "localhost",
-            "vllm_port": 8000,
-            "fastapi_host": "0.0.0.0",
-            "fastapi_port": 8001,
-            "api_keys_file": "config/api_keys.json",
-            "rate_limit": {
-                "qps": None,
-                "concurrent": None,
-                "tokens_per_minute": None
-            },
-            "log_level": "INFO"
-        }
-        with open(config_file, 'w', encoding='utf-8') as f:
-            yaml.dump(default_config, f, allow_unicode=True)
-        return AppConfig(**default_config)
+
+    # 创建默认配置
+    os.makedirs(os.path.dirname(config_file), exist_ok=True)
+    default_config = _default_config()
+    with open(config_file, 'w', encoding='utf-8') as f:
+        yaml.dump(default_config, f, allow_unicode=True)
+    return AppConfig(**default_config)
 
 
 def init_config() -> AppConfig:
@@ -50,4 +38,11 @@ def get_config() -> AppConfig:
     if app_config is None:
         return init_config()
     return app_config
+
+
+def _default_config() -> dict:
+    """生成默认配置，用于初始化 config.yaml。"""
+    base_config = AppConfig().model_dump()
+    # AppConfig().model_dump() 中的 rate_limit 是 BaseModel，需要转为 dict
+    return base_config
 

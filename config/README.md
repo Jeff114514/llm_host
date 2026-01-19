@@ -1,199 +1,108 @@
-# 配置模块
+## 概览
 
-配置模块包含所有配置文件，用于管理应用的各种设置。
+`config` 目录用于集中管理 **应用运行所需的所有配置文件**。  
+本文件只说明各配置文件的结构与字段含义，如何使用这些配置启动服务请参考：
+
+- `docs/QUICKSTART.md`
+- `docs/START_GUIDE.md`
 
 ## 文件结构
 
-```
+```text
 config/
-├── config.yaml          # 主配置文件
-├── api_keys.json        # API keys存储
-└── vllm_start_cmd.txt   # vLLM启动命令
+├── config.yaml        # 应用主配置
+├── api_keys.json      # API Key 列表
+└── vllm_start_cmd.txt # vLLM 启动命令模板（可选）
 ```
 
-## 配置文件说明
+## `config.yaml` – 应用主配置
 
-### config.yaml
+该文件会被 `app.config_manager` 解析为 `AppConfig` 对象，是整个服务的核心配置入口。
 
-主配置文件，包含所有应用设置：
+### 主要配置项
 
-```yaml
-# vLLM服务配置
-vllm_host: localhost
-vllm_port: 8002
+- **vLLM 服务配置**
+  - `vllm_host`: vLLM 服务监听地址（默认 `localhost`）
+  - `vllm_port`: vLLM 服务端口（默认 `8002`）
+- **FastAPI 服务配置**
+  - `fastapi_host`: FastAPI 监听地址（默认 `0.0.0.0`）
+  - `fastapi_port`: FastAPI 监听端口（默认 `8001`）
+- **API Key 文件路径**
+  - `api_keys_file`: API key 列表文件路径（默认 `config/api_keys.json`）
+- **请求限制（`rate_limit`）**
+  - `qps`: 每秒请求数上限，`null` 表示不启用 QPS 限制
+  - `concurrent`: 全局与每 Key 并发连接上限，`null` 表示不启用并发限制
+  - `tokens_per_minute`: 每分钟 Token 限制，`null` 表示不启用
+- **日志级别**
+  - `log_level`: 应用日志级别（`DEBUG` / `INFO` / `WARNING` / `ERROR`）
+- **vLLM 启动与 LoRA 配置（`vllm` 节）**
+  - `auto_start`: FastAPI 启动时是否自动拉起 vLLM
+  - `launch_mode`: 启动模式（`python_api` / `cli`）
+  - `start_cmd_file`: 默认读取 vLLM 启动命令的文件路径
+  - `start_cmd`: 可选的启动命令字符串（若设置，优先于 `start_cmd_file`）
+  - `log_dir` / `log_file`: vLLM 日志目录与日志文件
+  - `pid_dir` / `pid_file`: vLLM PID 目录与 PID 文件
+  - `python_launcher`: Python 启动器相关设置（conda 环境名、env 文件等）
+  - `extra_env`: 启动 vLLM 进程时附加的环境变量
+  - `lora`: LoRA 相关配置（是否启用、最大 LoRA 数量、预加载列表、运行时 resolver 等）
 
-# FastAPI服务配置
-fastapi_host: 0.0.0.0
-fastapi_port: 8001
+> 这些字段在代码中对应 `AppConfig` / `VLLMConfig` / `LoRASettings` 等 Pydantic 模型，具体使用逻辑可参考 `app/models.py` 与 `app/vllm_manager.py`。
 
-# API Keys文件路径
-api_keys_file: config/api_keys.json
+### 环境变量覆盖
 
-# 请求限制配置
-rate_limit:
-  qps: 10                    # 每秒请求数限制
-  concurrent: 5             # 并发连接数限制
-  tokens_per_minute: null    # 每分钟token数限制（null表示不限制）
-
-# 日志级别
-log_level: INFO
-```
-
-**配置项说明**:
-
-- `vllm_host`: vLLM服务主机地址
-- `vllm_port`: vLLM服务端口（默认8002）
-- `fastapi_host`: FastAPI监听地址（0.0.0.0表示所有接口）
-- `fastapi_port`: FastAPI监听端口（默认8001）
-- `api_keys_file`: API keys文件路径（相对于项目根目录）
-- `rate_limit.qps`: 每秒请求数限制
-- `rate_limit.concurrent`: 并发连接数限制
-- `rate_limit.tokens_per_minute`: 每分钟Token限制（null表示不限制）
-- `log_level`: 日志级别（DEBUG, INFO, WARNING, ERROR）
-
-**环境变量覆盖**:
-
-可以通过环境变量指定配置文件路径：
+- `CONFIG_FILE` 环境变量可用来指定自定义的配置文件路径：
 
 ```bash
-export CONFIG_FILE=/path/to/custom/config.yaml
+export CONFIG_FILE=/path/to/your_config.yaml
 ```
 
-### api_keys.json
+在这种情况下，`app.config_manager.load_config()` 会优先加载该文件。
 
-API keys存储文件，JSON格式：
+## `api_keys.json` – API Key 列表
+
+该文件被 `app.auth.APIKeyAuth` 加载为内存中的 `APIKeyInfo` 列表，用于请求认证与 admin 权限判定。
+
+### 基本结构
 
 ```json
 {
   "keys": [
     {
-      "key": "sk-your-api-key-here",
+      "key": "sk-your-key",
       "user": "user1",
       "quota": 10000,
-      "enabled": true
-    },
-    {
-      "key": "sk-another-key",
-      "user": "user2",
-      "quota": 5000,
       "enabled": true
     }
   ]
 }
 ```
 
-**字段说明**:
+### 字段含义
 
-- `key`: API key字符串（必需）
-- `user`: 用户标识（可选，用于日志和监控）
-- `quota`: 配额限制（可选，当前未使用，预留扩展）
-- `enabled`: 是否启用（true/false）
+- `key`: 实际的 API key 字符串（必填）
+- `user`: 逻辑用户名或标识（可选，用于日志与监控；当值为 `"admin"` 时可访问 `/admin/*`）
+- `quota`: 预留的配额字段（当前代码未强制使用，可用于后续扩展）
+- `enabled`: 是否启用该 key
 
-**安全建议**:
+### 自动创建
 
-1. 使用强随机字符串作为API key
-2. 定期轮换API keys
-3. 不要将包含真实keys的文件提交到版本控制
-4. 使用文件权限限制访问：`chmod 600 config/api_keys.json`
+- 文件不存在时，`APIKeyAuth` 会自动创建一个包含默认 key 的文件（`sk-default-key-change-me`），建议启动后立即修改或禁用。
 
-**热重载**:
+## `vllm_start_cmd.txt` – vLLM 启动命令模板（可选）
 
-修改API keys后，无需重启服务，调用管理端点重新加载：
+该文件用于存放一条完整的 vLLM 启动命令字符串，例如：
 
-```bash
-curl -X POST http://localhost:8001/admin/reload-keys \
-  -H "Authorization: Bearer sk-your-key"
+```text
+python -m vllm.entrypoints.openai.api_server --tokenizer-mode auto --model /path/to/model --dtype bfloat16 -tp 6 --disable-log-requests --port 8002 --gpu 0.9 --max-num-seqs 512 --served-model-name MyModel --enable-prefix-caching
 ```
 
-### vllm_start_cmd.txt
+### 使用方式
 
-vLLM启动命令文件，包含完整的vLLM启动命令：
+在运行时：
 
-```
-python -m vllm.entrypoints.openai.api_server --tokenizer-mode auto --model /root/sj-tmp/LLM/Qwen3-80B-A3B/ --dtype bfloat16 -tp 6 --disable-log-requests --port 8002 --gpu 0.9 --max-num-seqs 512 --served-model-name Qwen3-80B-A3B --enable-prefix-caching
-```
+- `app.vllm_manager.VLLMManager` 会按以下优先级解析启动命令：
+  1. `VLLMConfig.start_cmd`（`config.yaml` 中显式配置）
+  2. `VLLMConfig.start_cmd_file` 所指向的文件（默认即本文件）
+- `scripts/start.sh` 也会读取该文件（或环境变量）构造启动命令。
 
-**使用方式**:
-
-启动脚本会自动读取此文件作为vLLM启动命令。如果需要修改：
-
-1. 直接编辑此文件
-2. 或通过环境变量覆盖：`export VLLM_START_CMD='your command'`
-3. 或通过启动脚本参数传递：`./scripts/start.sh 'your command'`
-
-**注意事项**:
-
-- 确保端口与 `config.yaml` 中的 `vllm_port` 一致
-- 确保模型路径正确
-- 根据GPU配置调整 `--gpu` 和 `-tp` 参数
-
-## 配置管理
-
-### 创建自定义配置
-
-1. 复制默认配置：
-```bash
-cp config/config.yaml config/config.custom.yaml
-```
-
-2. 修改配置项
-
-3. 使用环境变量指定：
-```bash
-export CONFIG_FILE=config/config.custom.yaml
-./scripts/start.sh
-```
-
-### 验证配置
-
-应用启动时会自动验证配置，如果配置错误会显示错误信息。
-
-### 配置优先级
-
-1. 环境变量 `CONFIG_FILE`
-2. 默认路径 `config/config.yaml`
-3. 如果文件不存在，会创建默认配置
-
-## 最佳实践
-
-1. **生产环境配置**:
-   - 使用强API keys
-   - 设置合理的限制参数
-   - 启用日志记录
-   - 定期备份配置文件
-
-2. **开发环境配置**:
-   - 可以使用较宽松的限制
-   - 启用DEBUG日志级别
-   - 使用测试API keys
-
-3. **安全配置**:
-   - 限制配置文件访问权限
-   - 不要将敏感信息提交到版本控制
-   - 使用环境变量管理敏感配置
-
-4. **性能调优**:
-   - 根据实际负载调整QPS和并发限制
-   - 监控Token使用量，合理设置限制
-   - 根据服务器资源调整FastAPI workers数量
-
-## 故障排查
-
-### 配置加载失败
-
-1. 检查配置文件路径是否正确
-2. 检查YAML语法是否正确
-3. 查看应用启动日志
-
-### API key不生效
-
-1. 检查 `api_keys.json` 格式是否正确
-2. 确认key的 `enabled` 字段为 `true`
-3. 调用 `/admin/reload-keys` 重新加载
-
-### 端口冲突
-
-1. 检查端口是否被占用：`lsof -i :8001`
-2. 修改 `config.yaml` 中的端口配置
-3. 确保vLLM端口与启动命令中的端口一致
-
+该文件本身不包含逻辑，仅提供一个可外部编辑的命令模板，方便在不改代码的前提下调整 vLLM 启动参数。

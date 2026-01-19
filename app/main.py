@@ -11,6 +11,7 @@ from app.auth import APIKeyAuth
 from app.limiter import RequestLimiter
 from app.monitoring import MonitoringMiddleware, logger
 from app.routes import create_routes
+from app.vllm_manager import VLLMManager
 
 # 初始化配置和应用组件
 app_config = init_config()
@@ -26,12 +27,35 @@ async def lifespan(app: FastAPI):
     from app.log_manager import setup_log_rotation, clean_old_logs, rotate_log_file
     
     config = get_config()
+    vllm_manager = VLLMManager(config)
+    app.state.vllm_manager = vllm_manager
+    vllm_started = False
     # 启动时执行
     logger.info(
         "application_started",
         vllm_url=f"http://{config.vllm_host}:{config.vllm_port}",
         fastapi_port=config.fastapi_port
     )
+
+    if config.vllm.auto_start and not vllm_manager.is_running():
+        try:
+            pid = vllm_manager.start()
+            ready = vllm_manager.wait_for_ready(
+                config.vllm_host,
+                config.vllm_port,
+                timeout=60,
+            )
+            vllm_started = True
+            logger.info(
+                "vllm_auto_start_success",
+                pid=pid,
+                ready=ready,
+                host=config.vllm_host,
+                port=config.vllm_port,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("vllm_auto_start_failed", error=str(exc))
+            raise
     
     # 启动时清理旧日志（保留7天）
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
@@ -68,7 +92,8 @@ async def lifespan(app: FastAPI):
             await rotation_task
         except asyncio.CancelledError:
             pass
-    # logger.info("application_shutdown")
+    if vllm_started:
+        vllm_manager.stop()
 
 
 # 创建FastAPI应用
