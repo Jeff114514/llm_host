@@ -8,6 +8,7 @@
 - **结构化 JSON 日志** 与自动日志轮转/清理
 - 对 OpenAI 兼容接口的 **统一代理**（按 `model` 字段自动路由到对应后端）
 - vLLM 的 **多 LoRA 管理**（可选）
+- **热加载模型与后端控制**：支持在不停机情况下启动/停止 vLLM、sglang，并通过 admin 端点刷新模型列表
 
 整体架构：
 
@@ -17,12 +18,20 @@ Client → Nginx (反向代理) → FastAPI (认证 / 限流 / 监控 / 模型�
 
 > 所有认证、限流、监控逻辑都集中在 FastAPI 层，Nginx 仅负责反向代理与网络边界。
 
-## 模型路由（按 model 自动选择后端）
+## 模型路由与热加载
 
-- FastAPI 会维护 **模型名 → 后端（vllm/sglang）** 的映射，并在 `/v1/chat/completions` 与 `/v1/completions` 中根据请求体的 `model` 字段自动路由。
+- FastAPI 会维护 **模型名 → 后端实例（vllm/sglang + URL）** 的映射，并在 `/v1/chat/completions` 与 `/v1/completions` 中根据请求体的 `model` 字段自动路由。
+- **支持多个后端实例**：系统不绑定固定端口，可以动态注册多个 vLLM 或 sglang 实例，每个实例运行在不同端口，部署不同模型。
 - 映射来源：
   - `config/config.yaml` 中的 `model_backend_mapping`（手动配置，优先级最高）
-  - 自动发现：从已启动的后端拉取 `/v1/models` 聚合模型列表
+  - 自动发现：从所有已注册的后端实例拉取 `/v1/models` 聚合模型列表
+- 运行期热加载：
+  - `POST /admin/register-backend` 可动态注册新的后端实例（支持多个 vLLM/sglang 实例）
+  - `POST /admin/unregister-backend` 可注销后端实例
+  - `GET /admin/list-backends` 查看所有已注册的后端实例
+  - `POST /admin/start-vllm` / `stop-vllm`、`start-sglang` / `stop-sglang` 可动态启动/停止默认后端（通过管理器启动）
+  - `POST /admin/refresh-models` 可在后端加载新模型后刷新映射
+  - `/v1/models` 始终返回聚合后的模型列表；推理端点在模型未命中时会先尝试刷新再返回 404
 
 ## 文档导航
 

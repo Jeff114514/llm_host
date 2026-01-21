@@ -75,27 +75,54 @@
        }'
      ```
  
- - `GET /v1/models`  
-   - 说明：返回当前可用模型列表（OpenAI 兼容格式）。在响应前会轻量刷新后端模型列表。  
+- `GET /v1/models`  
+  - 说明：返回当前可用模型列表（OpenAI 兼容格式），聚合 vLLM 与 sglang。  
    - 示例：
      ```bash
      curl http://localhost:8001/v1/models \
        -H "Authorization: Bearer sk-your-api-key"
      ```
  
- ### 管理接口（需 admin Key）
- 
- - `POST /admin/reload-keys`：重新加载 `config/api_keys.json`。无请求体。  
- - `POST /admin/clean-logs?days=7`：清理日志目录中早于 `days` 天的轮转文件，返回删除数量与释放空间统计。  
- - `GET /admin/log-stats`：查看当前日志目录体积、数量、时间范围等统计信息。  
- - `POST /admin/load-lora-adapter`：将请求体透传给 vLLM `/v1/load_lora_adapter`，用于动态加载 LoRA。请求体示例：
-   ```json
-   {"lora_name": "sql_adapter", "lora_path": "/data/lora/sql"}
-   ```
- - `POST /admin/unload-lora-adapter`：透传到 vLLM `/v1/unload_lora_adapter`，用于卸载 LoRA。请求体示例：
-   ```json
-   {"lora_name": "sql_adapter"}
-   ```
+### 管理接口（需 admin Key）
+
+- `POST /admin/reload-keys`：重新加载 `config/api_keys.json`。无请求体。  
+- `POST /admin/clean-logs?days=7`：清理日志目录中早于 `days` 天的轮转文件，返回删除数量与释放空间统计。  
+- `GET /admin/log-stats`：查看当前日志目录体积、数量、时间范围等统计信息。  
+- `POST /admin/register-backend`：动态注册后端实例（支持多个 vLLM/sglang 实例）。请求体示例：
+  ```json
+  {
+    "backend": "vllm",
+    "base_url": "http://localhost:8004"
+  }
+  ```
+- `POST /admin/unregister-backend`：注销后端实例。请求体示例：
+  ```json
+  {
+    "base_url": "http://localhost:8004"
+  }
+  ```
+- `GET /admin/list-backends`：列出所有已注册的后端实例。  
+- `POST /admin/refresh-models`：从所有后端重新发现模型，更新路由映射。  
+- `POST /admin/start-vllm` / `POST /admin/stop-vllm`：动态启动 / 停止默认 vLLM 实例（通过管理器启动），并自动刷新模型列表。  
+- `POST /admin/start-sglang` / `POST /admin/stop-sglang`：动态启动 / 停止默认 sglang 实例（通过管理器启动），并自动刷新模型列表。  
+- `GET /admin/backend-status`：查看默认后端运行状态、所有已注册的后端实例及当前可用模型。  
+- `POST /admin/load-lora-adapter`：将请求体透传给 vLLM `/v1/load_lora_adapter`，用于动态加载 LoRA。请求体示例：
+  ```json
+  {
+    "lora_name": "sql_adapter",
+    "lora_path": "/data/lora/sql",
+    "base_url": "http://localhost:8004"
+  }
+  ```
+  其中 `base_url` 可选，不指定则使用默认 vLLM 实例。  
+- `POST /admin/unload-lora-adapter`：透传到 vLLM `/v1/unload_lora_adapter`，用于卸载 LoRA。请求体示例：
+  ```json
+  {
+    "lora_name": "sql_adapter",
+    "base_url": "http://localhost:8004"
+  }
+  ```
+  其中 `base_url` 可选，不指定则使用默认 vLLM 实例。
  
  ### 错误码与返回
  

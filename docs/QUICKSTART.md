@@ -147,8 +147,66 @@ sglang:
 - 重载 API Keys：`POST /admin/reload-keys`
 - 清理日志：`POST /admin/clean-logs?days=7`
 - 查看日志统计：`GET /admin/log-stats`
+- **动态注册后端实例**：`POST /admin/register-backend`（支持多个 vLLM/sglang 实例）
+- **注销后端实例**：`POST /admin/unregister-backend`
+- **列出所有后端**：`GET /admin/list-backends`
+- 动态刷新模型列表：`POST /admin/refresh-models`
+- 启停默认后端：`POST /admin/start-vllm` / `stop-vllm`、`start-sglang` / `stop-sglang`
+- 查看后端状态：`GET /admin/backend-status`
 - 动态加载 LoRA：`POST /admin/load-lora-adapter`（请求体与 vLLM `/v1/load_lora_adapter` 一致）
 - 动态卸载 LoRA：`POST /admin/unload-lora-adapter`
+
+### 动态注册后端实例示例
+
+系统支持动态注册多个后端实例，无需绑定固定端口。例如，可以启动多个 vLLM 实例，每个实例运行在不同端口并部署不同模型：
+
+```bash
+# 1. 手动启动 vLLM 实例（端口 8004，部署模型 A）
+python -m vllm.entrypoints.openai.api_server \
+  --model /path/to/model-a \
+  --port 8004 \
+  --served-model-name ModelA
+
+# 2. 手动启动另一个 vLLM 实例（端口 8005，部署模型 B）
+python -m vllm.entrypoints.openai.api_server \
+  --model /path/to/model-b \
+  --port 8005 \
+  --served-model-name ModelB
+
+# 3. 注册这些后端实例到 FastAPI 代理
+curl -X POST http://localhost:8001/admin/register-backend \
+  -H "Authorization: Bearer sk-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "vllm",
+    "base_url": "http://localhost:8004"
+  }'
+
+curl -X POST http://localhost:8001/admin/register-backend \
+  -H "Authorization: Bearer sk-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "vllm",
+    "base_url": "http://localhost:8005"
+  }'
+
+# 4. 刷新模型列表以发现新模型
+curl -X POST http://localhost:8001/admin/refresh-models \
+  -H "Authorization: Bearer sk-admin-key"
+
+# 5. 查看所有已注册的后端
+curl http://localhost:8001/admin/list-backends \
+  -H "Authorization: Bearer sk-admin-key"
+
+# 6. 现在可以使用这些模型了
+curl -X POST http://localhost:8001/v1/chat/completions \
+  -H "Authorization: Bearer sk-your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ModelA",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
 
 ## 启动服务
 
