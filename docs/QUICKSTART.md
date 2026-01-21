@@ -30,6 +30,10 @@ pip install -r requirements.txt
 vllm_host: localhost
 vllm_port: 8002
 
+# sglang服务配置（可选）
+sglang_host: localhost
+sglang_port: 8003
+
 # FastAPI服务配置
 fastapi_host: 0.0.0.0
 fastapi_port: 8001
@@ -45,6 +49,10 @@ rate_limit:
 
 # 日志级别
 log_level: INFO
+
+# 模型路由：模型名 -> 后端类型（vllm/sglang）
+# 若为空，则 FastAPI 会尝试从已启动的后端自动发现模型（通过 /v1/models）。
+model_backend_mapping: {}
 
 # vLLM Python 启动与 LoRA 管理
 vllm:
@@ -68,6 +76,16 @@ vllm:
       plugins:
         - lora_filesystem_resolver
       cache_dir: ./lora_cache
+
+# sglang 启动配置（可选）
+sglang:
+  auto_start: false
+  launch_mode: python_api
+  start_cmd_file: config/sglang_start_cmd.txt
+  start_cmd: null
+  log_file: logs/sglang.log
+  pid_file: .pids/sglang.pid
+  extra_env: {}
 ```
 
 ### API Keys配置 (`config/api_keys.json`)

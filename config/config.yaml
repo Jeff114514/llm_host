@@ -4,6 +4,10 @@
 vllm_host: localhost
 vllm_port: 8002
 
+# sglang 服务配置
+sglang_host: localhost
+sglang_port: 8003
+
 # FastAPI服务配置
 fastapi_host: 0.0.0.0
 fastapi_port: 8001
@@ -19,6 +23,10 @@ rate_limit:
 
 # 日志级别
 log_level: INFO
+
+# 模型路由：模型名 -> 后端类型（vllm/sglang）
+# 若为空，则 FastAPI 会尝试从已启动的后端自动发现模型（通过 /v1/models）。
+model_backend_mapping: {}
 
 # vLLM 启动与 LoRA 配置
 vllm:
@@ -53,3 +61,20 @@ vllm:
       plugins:
         - lora_filesystem_resolver
       cache_dir: ./lora_cache
+
+# sglang 启动配置（OpenAI 兼容服务）
+sglang:
+  auto_start: false                 # FastAPI 启动时是否自动拉起 sglang
+  launch_mode: python_api           # python_api | cli
+  start_cmd_file: config/sglang_start_cmd.txt
+  start_cmd: null                   # 可选：直接在此写入启动命令字符串
+  log_dir: logs
+  log_file: logs/sglang.log
+  log_max_size_mb: 100.0
+  pid_dir: .pids
+  pid_file: .pids/sglang.pid
+  python_launcher:
+    enabled: true
+    conda_env: Jeff-py312
+    env_file: null
+  extra_env: {}

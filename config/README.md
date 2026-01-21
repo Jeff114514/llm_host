@@ -10,9 +10,10 @@
 
 ```text
 config/
-├── config.yaml        # 应用主配置
-├── api_keys.json      # API Key 列表
-└── vllm_start_cmd.txt # vLLM 启动命令模板（可选）
+├── config.yaml          # 应用主配置
+├── api_keys.json        # API Key 列表
+├── vllm_start_cmd.txt   # vLLM 启动命令模板（可选）
+└── sglang_start_cmd.txt # sglang 启动命令模板（可选）
 ```
 
 ## `config.yaml` – 应用主配置
@@ -24,6 +25,9 @@ config/
 - **vLLM 服务配置**
   - `vllm_host`: vLLM 服务监听地址（默认 `localhost`）
   - `vllm_port`: vLLM 服务端口（默认 `8002`）
+- **sglang 服务配置**
+  - `sglang_host`: sglang 服务监听地址（默认 `localhost`）
+  - `sglang_port`: sglang 服务端口（默认 `8003`）
 - **FastAPI 服务配置**
   - `fastapi_host`: FastAPI 监听地址（默认 `0.0.0.0`）
   - `fastapi_port`: FastAPI 监听端口（默认 `8001`）
@@ -35,6 +39,9 @@ config/
   - `tokens_per_minute`: 每分钟 Token 限制，`null` 表示不启用
 - **日志级别**
   - `log_level`: 应用日志级别（`DEBUG` / `INFO` / `WARNING` / `ERROR`）
+- **模型路由（`model_backend_mapping`）**
+  - 用于配置 **模型名 -> 后端类型**（`vllm` / `sglang`）
+  - 手动映射优先级最高；若为空则会从后端 `/v1/models` 自动发现并聚合
 - **vLLM 启动与 LoRA 配置（`vllm` 节）**
   - `auto_start`: FastAPI 启动时是否自动拉起 vLLM
   - `launch_mode`: 启动模式（`python_api` / `cli`）
@@ -45,8 +52,17 @@ config/
   - `python_launcher`: Python 启动器相关设置（conda 环境名、env 文件等）
   - `extra_env`: 启动 vLLM 进程时附加的环境变量
   - `lora`: LoRA 相关配置（是否启用、最大 LoRA 数量、预加载列表、运行时 resolver 等）
+- **sglang 启动配置（`sglang` 节）**
+  - `auto_start`: FastAPI 启动时是否自动拉起 sglang
+  - `launch_mode`: 启动模式（`python_api` / `cli`）
+  - `start_cmd_file`: 默认读取 sglang 启动命令的文件路径
+  - `start_cmd`: 可选的启动命令字符串（若设置，优先于 `start_cmd_file`）
+  - `log_dir` / `log_file`: sglang 日志目录与日志文件
+  - `pid_dir` / `pid_file`: sglang PID 目录与 PID 文件
+  - `python_launcher`: Python 启动器相关设置（conda 环境名、env 文件等）
+  - `extra_env`: 启动 sglang 进程时附加的环境变量
 
-> 这些字段在代码中对应 `AppConfig` / `VLLMConfig` / `LoRASettings` 等 Pydantic 模型，具体使用逻辑可参考 `app/models.py` 与 `app/vllm_manager.py`。
+> 这些字段在代码中对应 `AppConfig` / `VLLMConfig` / `SGLangConfig` 等 Pydantic 模型，具体使用逻辑可参考 `app/models.py`、`app/vllm_manager.py`、`app/sglang_manager.py`。
 
 ### 环境变量覆盖
 
@@ -90,7 +106,7 @@ export CONFIG_FILE=/path/to/your_config.yaml
 
 ## `vllm_start_cmd.txt` – vLLM 启动命令模板（可选）
 
-该文件用于存放一条完整的 vLLM 启动命令字符串，例如：
+用于存放一条完整的 vLLM 启动命令字符串，例如：
 
 ```text
 python -m vllm.entrypoints.openai.api_server --tokenizer-mode auto --model /path/to/model --dtype bfloat16 -tp 6 --disable-log-requests --port 8002 --gpu 0.9 --max-num-seqs 512 --served-model-name MyModel --enable-prefix-caching
@@ -106,3 +122,18 @@ python -m vllm.entrypoints.openai.api_server --tokenizer-mode auto --model /path
 - `scripts/start.sh` 也会读取该文件（或环境变量）构造启动命令。
 
 该文件本身不包含逻辑，仅提供一个可外部编辑的命令模板，方便在不改代码的前提下调整 vLLM 启动参数。
+
+## `sglang_start_cmd.txt` – sglang 启动命令模板（可选）
+
+用于存放一条完整的 sglang 启动命令字符串，例如：
+
+```text
+python -m sglang.launch_server --host 0.0.0.0 --port 8003 --model-path /path/to/model --served-model-name MyModel
+```
+
+在运行时：
+
+- `app.sglang_manager.SGLangManager` 会按以下优先级解析启动命令：
+  1. `SGLangConfig.start_cmd`（`config.yaml` 中显式配置）
+  2. `SGLangConfig.start_cmd_file` 所指向的文件（默认即本文件）
+

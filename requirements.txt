@@ -8,3 +8,4 @@ httpx
 pyyaml
 python-multipart
 structlog
+sglang

@@ -45,11 +45,6 @@ def create_routes(app: FastAPI, request_limiter: RequestLimiter):
             "vllm_url": f"http://{app_config.vllm_host}:{app_config.vllm_port}"
         }
     
-    @app.get("/metrics")
-    async def metrics():
-        """Prometheus指标端点（由instrumentator自动提供）"""
-        pass
-    
     @app.post("/v1/chat/completions")
     @app.post("/chat/completions")
     @apply_rate_limit_if_needed

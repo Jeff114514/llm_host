@@ -12,6 +12,8 @@ from app.limiter import RequestLimiter
 from app.monitoring import MonitoringMiddleware, logger
 from app.routes import create_routes
 from app.vllm_manager import VLLMManager
+from app.sglang_manager import SGLangManager
+from app.model_router import ModelRouter
 
 # 初始化配置和应用组件
 app_config = init_config()
@@ -30,10 +32,17 @@ async def lifespan(app: FastAPI):
     vllm_manager = VLLMManager(config)
     app.state.vllm_manager = vllm_manager
     vllm_started = False
+    sglang_manager = SGLangManager(config)
+    app.state.sglang_manager = sglang_manager
+    sglang_started = False
+
+    model_router = ModelRouter(config)
+    app.state.model_router = model_router
     # 启动时执行
     logger.info(
         "application_started",
         vllm_url=f"http://{config.vllm_host}:{config.vllm_port}",
+        sglang_url=f"http://{config.sglang_host}:{config.sglang_port}",
         fastapi_port=config.fastapi_port
     )
 
@@ -56,6 +65,32 @@ async def lifespan(app: FastAPI):
         except Exception as exc:  # noqa: BLE001
             logger.error("vllm_auto_start_failed", error=str(exc))
             raise
+
+    if config.sglang.auto_start and not sglang_manager.is_running():
+        try:
+            pid = sglang_manager.start()
+            ready = sglang_manager.wait_for_ready(
+                config.sglang_host,
+                config.sglang_port,
+                timeout=60,
+            )
+            sglang_started = True
+            logger.info(
+                "sglang_auto_start_success",
+                pid=pid,
+                ready=ready,
+                host=config.sglang_host,
+                port=config.sglang_port,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("sglang_auto_start_failed", error=str(exc))
+            raise
+
+    # 启动后刷新模型映射（自动发现 + 手动映射）
+    try:
+        await model_router.refresh_models()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("model_router_refresh_failed", error=str(exc))
     
     # 启动时清理旧日志（保留7天）
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
@@ -69,7 +104,11 @@ async def lifespan(app: FastAPI):
             )
         
         # 检查并轮转大文件
-        for log_file in [os.path.join(log_dir, "fastapi.log"), os.path.join(log_dir, "vllm.log")]:
+        for log_file in [
+            os.path.join(log_dir, "fastapi.log"),
+            os.path.join(log_dir, "vllm.log"),
+            os.path.join(log_dir, "sglang.log"),
+        ]:
             rotate_log_file(log_file, max_size_mb=100.0)
     except Exception as e:
         logger.warning("startup_log_cleanup_failed", error=str(e))
@@ -94,6 +133,8 @@ async def lifespan(app: FastAPI):
             pass
     if vllm_started:
         vllm_manager.stop()
+    if sglang_started:
+        sglang_manager.stop()
 
 
 # 创建FastAPI应用
