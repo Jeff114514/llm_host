@@ -52,13 +52,117 @@ def create_routes(app: FastAPI, request_limiter: RequestLimiter):
         return router.build_url(backend_type, path, base_url)
     
     @app.get("/health")
-    async def health_check():
-        """健康检查端点"""
-        return {
-            "status": "healthy",
+    async def health_check(request: Request):
+        """健康检查端点 - 检查所有后端服务的健康状态
+        
+        返回状态说明：
+        - "healthy": 所有后端服务都正常
+        - "degraded": 部分后端服务不可用（至少有一个正常）
+        - "unhealthy": 所有后端服务都不可用或没有注册的后端
+        """
+        router = getattr(request.app.state, "model_router", None)
+        
+        # 如果路由器未初始化，返回不健康状态
+        if router is None:
+            return {
+                "status": "unhealthy",
+                "service": "vLLM Proxy",
+                "message": "模型路由器未初始化",
+                "backends": {}
+            }
+        
+        # 获取所有已注册的后端实例
+        backends = router.list_backends()
+        
+        if not backends:
+            # 没有注册的后端
+            return {
+                "status": "unhealthy",
+                "service": "vLLM Proxy",
+                "message": "没有注册的后端服务",
+                "backends": {}
+            }
+        
+        # 检查每个后端的健康状态
+        backend_statuses = {}
+        healthy_count = 0
+        total_count = len(backends)
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            for backend_info in backends:
+                base_url = backend_info["base_url"]
+                backend_type = backend_info["backend"]
+                instance_id = backend_info["instance_id"]
+                
+                health_url = f"{base_url}/health"
+                try:
+                    resp = await client.get(health_url)
+                    if resp.status_code == 200:
+                        backend_statuses[instance_id] = {
+                            "backend": backend_type,
+                            "base_url": base_url,
+                            "status": "healthy",
+                            "response": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None
+                        }
+                        healthy_count += 1
+                    else:
+                        backend_statuses[instance_id] = {
+                            "backend": backend_type,
+                            "base_url": base_url,
+                            "status": "unhealthy",
+                            "error": f"HTTP {resp.status_code}"
+                        }
+                except httpx.TimeoutException:
+                    backend_statuses[instance_id] = {
+                        "backend": backend_type,
+                        "base_url": base_url,
+                        "status": "unhealthy",
+                        "error": "连接超时"
+                    }
+                except httpx.ConnectError:
+                    backend_statuses[instance_id] = {
+                        "backend": backend_type,
+                        "base_url": base_url,
+                        "status": "unhealthy",
+                        "error": "连接失败"
+                    }
+                except Exception as e:
+                    backend_statuses[instance_id] = {
+                        "backend": backend_type,
+                        "base_url": base_url,
+                        "status": "unhealthy",
+                        "error": str(e)
+                    }
+        
+        # 根据检查结果确定整体状态
+        if healthy_count == 0:
+            overall_status = "unhealthy"
+        elif healthy_count < total_count:
+            overall_status = "degraded"
+        else:
+            overall_status = "healthy"
+        
+        # 构建响应
+        response = {
+            "status": overall_status,
             "service": "vLLM Proxy",
-            "vllm_url": f"http://{app_config.vllm_host}:{app_config.vllm_port}"
+            "backends": backend_statuses,
+            "summary": {
+                "total": total_count,
+                "healthy": healthy_count,
+                "unhealthy": total_count - healthy_count
+            }
         }
+        
+        # 为了向后兼容，保留原有的字段
+        vllm_url = router.get_base_url(BackendType.VLLM)
+        sglang_url = router.get_base_url(BackendType.SGLANG)
+        if vllm_url:
+            response["vllm_url"] = vllm_url
+        if sglang_url:
+            response["sglang_url"] = sglang_url
+        
+        return response
     
     @app.post("/v1/chat/completions")
     @app.post("/chat/completions")

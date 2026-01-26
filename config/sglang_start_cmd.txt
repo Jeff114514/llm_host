@@ -1,2 +1,2 @@
-python -m sglang.launch_server --host 0.0.0.0 --port 8003 --model-path /path/to/model --served-model-name your-model-name
+python -m sglang.launch_server --host 0.0.0.0 --port 8003 --model-path /root/sj-tmp/LLM/Qwen3-80B-A3B-Thinking-AWQ-4bit/ --served-model-name Qwen3-80B-A3B-Thinking --mem-fraction-static 0.9 --trust-remote-code --tp 2
 

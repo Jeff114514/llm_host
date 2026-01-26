@@ -18,16 +18,74 @@
  
  ### 健康与监控
  
- - `GET /health`（无需鉴权）：返回服务存活状态与当前指向的后端地址  
-   响应示例：
-   ```json
-   {
-     "status": "healthy",
-     "service": "vLLM Proxy",
-     "vllm_url": "http://localhost:8002",
-     "sglang_url": "http://localhost:8003"
-   }
-   ```
+- `GET /health`（无需鉴权）：检查所有后端服务的健康状态并返回整体状态
+  
+  **状态枚举值：**
+  - `"healthy"`: 所有后端服务都正常
+  - `"degraded"`: 部分后端服务不可用（至少有一个正常）
+  - `"unhealthy"`: 所有后端服务都不可用或没有注册的后端
+  
+  **响应示例（所有后端正常）：**
+  ```json
+  {
+    "status": "healthy",
+    "service": "vLLM Proxy",
+    "backends": {
+      "http://localhost:8002": {
+        "backend": "vllm",
+        "base_url": "http://localhost:8002",
+        "status": "healthy",
+        "response": {...}
+      },
+      "http://localhost:8003": {
+        "backend": "sglang",
+        "base_url": "http://localhost:8003",
+        "status": "healthy",
+        "response": {...}
+      }
+    },
+    "summary": {
+      "total": 2,
+      "healthy": 2,
+      "unhealthy": 0
+    },
+    "vllm_url": "http://localhost:8002",
+    "sglang_url": "http://localhost:8003"
+  }
+  ```
+  
+  **响应示例（部分后端不可用）：**
+  ```json
+  {
+    "status": "degraded",
+    "service": "vLLM Proxy",
+    "backends": {
+      "http://localhost:8002": {
+        "backend": "vllm",
+        "base_url": "http://localhost:8002",
+        "status": "healthy",
+        "response": {...}
+      },
+      "http://localhost:8003": {
+        "backend": "sglang",
+        "base_url": "http://localhost:8003",
+        "status": "unhealthy",
+        "error": "连接失败"
+      }
+    },
+    "summary": {
+      "total": 2,
+      "healthy": 1,
+      "unhealthy": 1
+    },
+    "vllm_url": "http://localhost:8002"
+  }
+  ```
+  
+  **说明：**
+  - 接口会实际检查所有已注册的后端实例的 `/health` 端点
+  - 每个后端有 5 秒的超时时间
+  - 如果后端不可用，会在 `backends` 中记录错误信息
  - `GET /metrics`（无需鉴权）：Prometheus 指标出口，由 `prometheus-fastapi-instrumentator` 提供。
  
  ### 模型与推理
