@@ -64,6 +64,12 @@ async def lifespan(app: FastAPI):
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("vllm_auto_start_failed", error=str(exc))
+            # 清理已启动的资源
+            if vllm_started:
+                try:
+                    vllm_manager.stop()
+                except Exception as cleanup_exc:  # noqa: BLE001
+                    logger.warning("vllm_cleanup_failed", error=str(cleanup_exc))
             raise
 
     if config.sglang.auto_start and not sglang_manager.is_running():
@@ -84,6 +90,18 @@ async def lifespan(app: FastAPI):
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("sglang_auto_start_failed", error=str(exc))
+            # 清理已启动的资源
+            if sglang_started:
+                try:
+                    sglang_manager.stop()
+                except Exception as cleanup_exc:  # noqa: BLE001
+                    logger.warning("sglang_cleanup_failed", error=str(cleanup_exc))
+            # 如果 vLLM 已启动，也需要清理
+            if vllm_started:
+                try:
+                    vllm_manager.stop()
+                except Exception as cleanup_exc:  # noqa: BLE001
+                    logger.warning("vllm_cleanup_failed_after_sglang_error", error=str(cleanup_exc))
             raise
 
     # 启动后刷新模型映射（自动发现 + 手动映射）

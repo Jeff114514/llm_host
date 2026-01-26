@@ -64,7 +64,7 @@ vllm:
 
 # sglang 启动配置（OpenAI 兼容服务）
 sglang:
-  auto_start: false                  # FastAPI 启动时是否自动拉起 sglang
+  auto_start: true                  # FastAPI 启动时是否自动拉起 sglang
   launch_mode: python_api           # python_api | cli
   start_cmd_file: config/sglang_start_cmd.txt
   start_cmd: null                   # 可选：直接在此写入启动命令字符串
@@ -75,7 +75,7 @@ sglang:
   pid_file: .pids/sglang.pid
   python_launcher:
     enabled: true
-    conda_env: Jeff-py312
+    conda_env: Jeff-py312-sgl
     env_file: null
   extra_env:
     CUDA_VISIBLE_DEVICES: "4,5"     # 使用第 5、6 张 GPU 卡（索引从 0 开始，4,5 对应第 5、6 张卡）
