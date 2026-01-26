@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # vLLM Proxy 启动脚本
-# 使用方法: ./scripts/start.sh [vllm_command]
+# 使用方法: ./scripts/start.sh
+# 注意: vLLM 和 sglang 由 FastAPI 根据 config.yaml 中的 auto_start 配置自动启动
 
 set -e
 
@@ -24,8 +25,6 @@ LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-PYTHON_LAUNCHER="$PROJECT_DIR/scripts/start_vllm.py"
-VLLM_USE_PYTHON="${VLLM_USE_PYTHON:-true}"
 
 # 检查Python环境
 if ! command -v "$PYTHON_BIN" &> /dev/null; then
@@ -47,23 +46,17 @@ fi
 
 # 加载配置
 if [ -f "config/config.yaml" ]; then
-    VLLM_HOST=$(grep "vllm_host:" config/config.yaml | awk '{print $2}' | tr -d '"')
-    VLLM_PORT=$(grep "vllm_port:" config/config.yaml | awk '{print $2}' | tr -d '"')
-    FASTAPI_PORT=$(grep "fastapi_port:" config/config.yaml | awk '{print $2}' | tr -d '"')
+    VLLM_HOST=$(grep "vllm_host:" config/config.yaml | awk '{print $2}' | tr -d '"' || echo "localhost")
+    VLLM_PORT=$(grep "vllm_port:" config/config.yaml | awk '{print $2}' | tr -d '"' || echo "8002")
+    SGLANG_HOST=$(grep "sglang_host:" config/config.yaml | awk '{print $2}' | tr -d '"' || echo "localhost")
+    SGLANG_PORT=$(grep "sglang_port:" config/config.yaml | awk '{print $2}' | tr -d '"' || echo "8003")
+    FASTAPI_PORT=$(grep "fastapi_port:" config/config.yaml | awk '{print $2}' | tr -d '"' || echo "8001")
 else
     VLLM_HOST="localhost"
-    VLLM_PORT=8000
+    VLLM_PORT=8002
+    SGLANG_HOST="localhost"
+    SGLANG_PORT=8003
     FASTAPI_PORT=8001
-fi
-
-# vLLM启动命令（从参数、环境变量或配置文件获取）
-if [ -n "$1" ]; then
-    VLLM_CMD="$1"
-elif [ -n "$VLLM_START_CMD" ]; then
-    VLLM_CMD="$VLLM_START_CMD"
-elif [ -f "config/vllm_start_cmd.txt" ]; then
-    VLLM_CMD=$(cat config/vllm_start_cmd.txt | tr -d '\n')
-    echo -e "${GREEN}从配置文件加载vLLM启动命令${NC}"
 fi
 
 # 停止占用端口的进程
@@ -129,147 +122,6 @@ check_port() {
         fi
     fi
     return 0
-}
-
-start_vllm_python() {
-    if [ "$VLLM_USE_PYTHON" != "true" ]; then
-        return 1
-    fi
-    if [ ! -f "$PYTHON_LAUNCHER" ]; then
-        echo -e "${YELLOW}未找到Python启动器，回退到命令行方式${NC}"
-        return 1
-    fi
-    echo -e "${GREEN}使用Python启动器启动vLLM服务...${NC}"
-    local -a cmd
-    if [ "$CONDA_AVAILABLE" = true ]; then
-        # 确保无论从哪里执行，都能 import app（避免 ModuleNotFoundError: No module named 'app'）
-        cmd=(env PYTHONPATH="$PROJECT_DIR" conda run -n "$CONDA_ENV" "$PYTHON_BIN" "$PYTHON_LAUNCHER")
-    else
-        cmd=(env PYTHONPATH="$PROJECT_DIR" "$PYTHON_BIN" "$PYTHON_LAUNCHER")
-    fi
-    if [ -n "$VLLM_CMD" ]; then
-        cmd+=("--command" "$VLLM_CMD")
-    fi
-    cmd+=("--timeout" "120")
-    if "${cmd[@]}"; then
-        if [ -f "$PID_DIR/vllm.pid" ]; then
-            local pid_text
-            pid_text=$(cat "$PID_DIR/vllm.pid" | tr -d '\n')
-            echo -e "${GREEN}vLLM已通过Python启动 (PID: $pid_text)${NC}"
-        fi
-        return 0
-    fi
-    echo -e "${YELLOW}Python启动器失败，尝试命令行方式${NC}"
-    return 1
-}
-
-# 启动vLLM
-start_vllm() {
-    if ! check_port $VLLM_PORT "vLLM"; then
-        echo -e "${RED}无法启动vLLM，端口被占用${NC}"
-        return 1
-    fi
-
-    local launched_via_python=false
-    if start_vllm_python; then
-        launched_via_python=true
-    fi
-
-    if [ "$launched_via_python" != "true" ]; then
-        if [ -z "$VLLM_CMD" ]; then
-            echo -e "${YELLOW}未指定vLLM启动命令${NC}"
-            echo "使用方法: $0 'vllm启动命令'"
-            echo "或设置环境变量: export VLLM_START_CMD='your vllm command'"
-            echo "或创建配置文件: echo 'your command' > config/vllm_start_cmd.txt"
-            echo ""
-            read -p "请输入vLLM启动命令（留空跳过vLLM启动）: " VLLM_CMD
-            if [ -z "$VLLM_CMD" ]; then
-                echo -e "${YELLOW}跳过vLLM启动（未提供启动命令）${NC}"
-                return 0
-            fi
-        fi
-
-        echo -e "${GREEN}通过命令行启动vLLM服务...${NC}"
-
-        if [ -f "$LOG_DIR/vllm.log" ]; then
-            local log_size=$(stat -f%z "$LOG_DIR/vllm.log" 2>/dev/null || stat -c%s "$LOG_DIR/vllm.log" 2>/dev/null || echo 0)
-            local max_size=$((100 * 1024 * 1024))
-            if [ "$log_size" -gt "$max_size" ]; then
-                local timestamp=$(date +"%Y%m%d_%H%M%S")
-                mv "$LOG_DIR/vllm.log" "$LOG_DIR/vllm.log.$timestamp" 2>/dev/null || true
-                echo -e "${GREEN}轮转vLLM日志文件（大小: $((log_size / 1024 / 1024))MB）${NC}"
-            fi
-        fi
-        touch "$LOG_DIR/vllm.log"
-
-        if command -v stdbuf &> /dev/null; then
-            STDBUF_CMD="stdbuf -oL -eL"
-        else
-            STDBUF_CMD=""
-            echo -e "${YELLOW}警告: stdbuf 不可用，日志可能缓冲${NC}"
-        fi
-
-        if [ "$CONDA_AVAILABLE" = true ]; then
-            if [ -n "$STDBUF_CMD" ]; then
-                nohup env PYTHONUNBUFFERED=1 bash -c "$STDBUF_CMD conda run -n $CONDA_ENV $VLLM_CMD" >> "$LOG_DIR/vllm.log" 2>&1 &
-            else
-                nohup env PYTHONUNBUFFERED=1 bash -c "conda run -n $CONDA_ENV $VLLM_CMD" >> "$LOG_DIR/vllm.log" 2>&1 &
-            fi
-        else
-            if [ -n "$STDBUF_CMD" ]; then
-                nohup env PYTHONUNBUFFERED=1 bash -c "$STDBUF_CMD $VLLM_CMD" >> "$LOG_DIR/vllm.log" 2>&1 &
-            else
-                nohup env PYTHONUNBUFFERED=1 bash -c "$VLLM_CMD" >> "$LOG_DIR/vllm.log" 2>&1 &
-            fi
-        fi
-        VLLM_PID=$!
-        echo $VLLM_PID > "$PID_DIR/vllm.pid"
-        {
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========================================"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 启动vLLM服务"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] PID: $VLLM_PID"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 启动命令: $VLLM_CMD"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========================================"
-        } >> "$LOG_DIR/vllm.log"
-
-        sleep 1
-        if command -v ps &> /dev/null && ps -p $VLLM_PID > /dev/null 2>&1; then
-            echo -e "${GREEN}vLLM已启动，PID: $VLLM_PID${NC}"
-        elif command -v tasklist &> /dev/null && tasklist //FI "PID eq $VLLM_PID" 2>/dev/null | grep -q "$VLLM_PID"; then
-            echo -e "${GREEN}vLLM已启动，PID: $VLLM_PID${NC}"
-        else
-            echo -e "${YELLOW}警告: 无法验证vLLM进程状态，PID: $VLLM_PID${NC}"
-            echo -e "${YELLOW}请检查日志文件: $LOG_DIR/vllm.log${NC}"
-            if [ -f "$LOG_DIR/vllm.log" ] && [ -s "$LOG_DIR/vllm.log" ]; then
-                echo "最近的日志内容:"
-                tail -n 20 "$LOG_DIR/vllm.log"
-            fi
-        fi
-    else
-        echo "日志文件: $LOG_DIR/vllm.log"
-    fi
-
-    echo "等待vLLM服务就绪..."
-    for i in {1..120}; do
-        if curl -s "http://$VLLM_HOST:$VLLM_PORT/health" > /dev/null 2>&1 || \
-           curl -s "http://$VLLM_HOST:$VLLM_PORT/v1/models" > /dev/null 2>&1; then
-            echo -e "${GREEN}vLLM服务已就绪${NC}"
-            local pid_display=""
-            if [ -f "$PID_DIR/vllm.pid" ]; then
-                pid_display=$(cat "$PID_DIR/vllm.pid" | tr -d '\n')
-            elif [ -n "$VLLM_PID" ]; then
-                pid_display="$VLLM_PID"
-            fi
-            if [ -n "$pid_display" ]; then
-                echo -e "${GREEN}vLLM进程PID: $pid_display${NC}"
-            fi
-            return 0
-        fi
-        sleep 2
-    done
-
-    echo -e "${RED}警告: vLLM服务可能未正常启动，请检查日志${NC}"
-    return 1
 }
 
 # 启动FastAPI
@@ -463,10 +315,10 @@ main() {
     echo -e "${GREEN}  vLLM Proxy 启动脚本${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
+    echo -e "${GREEN}注意: vLLM 和 sglang 将根据 config.yaml 中的 auto_start 配置由 FastAPI 自动启动${NC}"
+    echo ""
     
-    start_vllm
-    sleep 2
-    
+    # 启动 FastAPI（如果 auto_start=true，会自动启动 vLLM 和 sglang）
     start_fastapi
     sleep 2
     
@@ -490,8 +342,9 @@ main() {
     echo -e "${GREEN}========================================${NC}"
     echo ""
     echo "服务状态:"
-    echo "  - vLLM:    http://$VLLM_HOST:$VLLM_PORT"
     echo "  - FastAPI: http://localhost:$FASTAPI_PORT"
+    echo "  - vLLM:    http://$VLLM_HOST:$VLLM_PORT (由 FastAPI 根据 auto_start 配置自动启动)"
+    echo "  - sglang:  http://$SGLANG_HOST:$SGLANG_PORT (由 FastAPI 根据 auto_start 配置自动启动)"
     echo "  - Nginx:   http://localhost:8000"
     echo ""
     echo "PID文件: $PID_DIR/"

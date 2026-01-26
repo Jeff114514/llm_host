@@ -59,8 +59,12 @@ def create_routes(app: FastAPI, request_limiter: RequestLimiter):
         - "healthy": 所有后端服务都正常
         - "degraded": 部分后端服务不可用（至少有一个正常）
         - "unhealthy": 所有后端服务都不可用或没有注册的后端
+        
+        注意：只检查实际启动的后端服务（通过 manager.is_running() 判断）
         """
         router = getattr(request.app.state, "model_router", None)
+        vllm_manager = getattr(request.app.state, "vllm_manager", None)
+        sglang_manager = getattr(request.app.state, "sglang_manager", None)
         
         # 如果路由器未初始化，返回不健康状态
         if router is None:
@@ -72,24 +76,52 @@ def create_routes(app: FastAPI, request_limiter: RequestLimiter):
             }
         
         # 获取所有已注册的后端实例
-        backends = router.list_backends()
+        all_backends = router.list_backends()
         
-        if not backends:
-            # 没有注册的后端
+        # 获取配置中的默认后端 URL（用于识别通过 manager 启动的默认实例）
+        config = get_config()
+        default_vllm_url = f"http://{config.vllm_host}:{config.vllm_port}" if config.vllm_host and config.vllm_port else None
+        default_sglang_url = f"http://{config.sglang_host}:{config.sglang_port}" if config.sglang_host and config.sglang_port else None
+        
+        # 过滤出实际启动的后端实例
+        # 对于默认后端（通过 manager 启动的），检查 manager.is_running()
+        # 对于动态注册的后端，假设它们都是启动的（由管理员负责管理）
+        active_backends = []
+        
+        for backend_info in all_backends:
+            base_url = backend_info["base_url"]
+            backend_type = backend_info["backend"]
+            
+            # 如果是默认 vLLM 实例（URL 匹配配置中的默认 URL），检查 vllm_manager 是否运行
+            if backend_type == BackendType.VLLM and default_vllm_url and base_url == default_vllm_url:
+                if vllm_manager and vllm_manager.is_running():
+                    active_backends.append(backend_info)
+                # 如果未启动，跳过这个后端
+            # 如果是默认 sglang 实例（URL 匹配配置中的默认 URL），检查 sglang_manager 是否运行
+            elif backend_type == BackendType.SGLANG and default_sglang_url and base_url == default_sglang_url:
+                if sglang_manager and sglang_manager.is_running():
+                    active_backends.append(backend_info)
+                # 如果未启动，跳过这个后端
+            else:
+                # 动态注册的后端，假设都是启动的（由管理员负责确保它们运行）
+                active_backends.append(backend_info)
+        
+        if not active_backends:
+            # 没有启动的后端
             return {
                 "status": "unhealthy",
                 "service": "vLLM Proxy",
-                "message": "没有注册的后端服务",
+                "message": "没有启动的后端服务",
                 "backends": {}
             }
         
         # 检查每个后端的健康状态
         backend_statuses = {}
         healthy_count = 0
-        total_count = len(backends)
+        total_count = len(active_backends)
         
         async with httpx.AsyncClient(timeout=5.0) as client:
-            for backend_info in backends:
+            for backend_info in active_backends:
                 base_url = backend_info["base_url"]
                 backend_type = backend_info["backend"]
                 instance_id = backend_info["instance_id"]
@@ -154,13 +186,12 @@ def create_routes(app: FastAPI, request_limiter: RequestLimiter):
             }
         }
         
-        # 为了向后兼容，保留原有的字段
-        vllm_url = router.get_base_url(BackendType.VLLM)
-        sglang_url = router.get_base_url(BackendType.SGLANG)
-        if vllm_url:
-            response["vllm_url"] = vllm_url
-        if sglang_url:
-            response["sglang_url"] = sglang_url
+        # 为了向后兼容，保留原有的字段（只包含实际启动的后端）
+        # 使用配置中的默认 URL，而不是从 router 获取（因为可能已被注销）
+        if default_vllm_url and vllm_manager and vllm_manager.is_running():
+            response["vllm_url"] = default_vllm_url
+        if default_sglang_url and sglang_manager and sglang_manager.is_running():
+            response["sglang_url"] = default_sglang_url
         
         return response
     

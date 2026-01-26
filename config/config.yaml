@@ -64,7 +64,7 @@ vllm:
 
 # sglang 启动配置（OpenAI 兼容服务）
 sglang:
-  auto_start: true                  # FastAPI 启动时是否自动拉起 sglang
+  auto_start: false                  # FastAPI 启动时是否自动拉起 sglang
   launch_mode: python_api           # python_api | cli
   start_cmd_file: config/sglang_start_cmd.txt
   start_cmd: null                   # 可选：直接在此写入启动命令字符串
